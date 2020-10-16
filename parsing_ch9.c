@@ -4,17 +4,17 @@
 #include "mpc.h"
 
 typedef struct lval {
-  int type;
-  long num;
-  char* err;
-  char* sym;
-  int count;
-  struct lval** cell;
+  int type; // what kind of lval is this?
+  long num; // filled if this is a number
+  char* err; // filled if this is an error
+  char* sym; // filled if this is a symbol
+  int count; // number of sexprs
+  struct lval** cell; // the other lvals in the sexpr
 } lval;
 
 enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR };
-/* enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM }; */
 
+// returns an lval of a number type
 lval* lval_num(long x){
   lval* v = malloc(sizeof(lval));
   v->type = LVAL_NUM;
@@ -22,6 +22,7 @@ lval* lval_num(long x){
   return v;
 }
 
+// returns an lval of an error type
 lval* lval_err(char* m){
   lval* v = malloc(sizeof(lval));
   v->type = LVAL_ERR;
@@ -30,6 +31,7 @@ lval* lval_err(char* m){
   return v;
 }
 
+// returns an lval of a symbol type
 lval* lval_sym(char* s){
   lval* v = malloc(sizeof(lval));
   v->type = LVAL_SYM;
@@ -38,6 +40,9 @@ lval* lval_sym(char* s){
   return v;
 }
 
+// returns an lval for an sexpression type
+// with the initial value for the contents
+// set to NULL
 lval* lval_sexpr(void){
   lval* v = malloc(sizeof(lval));
   v->type = LVAL_SEXPR;
@@ -46,27 +51,46 @@ lval* lval_sexpr(void){
   return v;
 }
 
+// this function will take an lval, first
+// delete any malloced data inside it, then
+// recursively delete any lvals it points to
+// in the same way, then free the original 
+// lval itself
 void lval_del(lval* v){
+  // free any contents
   switch(v->type){
-  case LVAL_NUM: break;
-  case LVAL_ERR: free(v->err); break;
-  case LVAL_SYM: free(v->sym); break;
+  case LVAL_NUM:
+    break;
+  case LVAL_ERR:
+    free(v->err);
+    break;
+  case LVAL_SYM:
+    free(v->sym);
+    break;
   case LVAL_SEXPR:
     for (int i = 0; i < v->count; i++){
       lval_del(v->cell[i]);
     }
     free(v->cell);
-  break;
+    break;
   }
+  // free the lval itself
   free(v);
 }
 
+// 
 lval* lval_read_num(mpc_ast_t* t){
   errno = 0;
   long x = strtol(t->contents,NULL,10);
-  return errno != ERANGE ? lval_num(x) : lval_err("invalid number");
+  return errno != ERANGE ?
+    lval_num(x) : lval_err("invalid number");
 }
 
+// take in an lval v and a new lval x
+// increase the count on v by 1
+// allocate new space with the new, bigger, count.
+// add the new lval to the end of the list
+// return the original lval v with the new list
 lval* lval_add(lval* v, lval* x){
   v->count++;
   v->cell = realloc(v->cell,sizeof(lval*) * v->count);
@@ -75,13 +99,32 @@ lval* lval_add(lval* v, lval* x){
 }
 
 lval* lval_read(mpc_ast_t* t){
-  if (strstr(t->tag,"number")) { return lval_read_num(t); }
-  if (strstr(t->tag,"symbol")) { return lval_sym(t->contents); }
+  // if we find a number tag
+  // send the ast to the read_num
+  // and get a num lval
+  if (strstr(t->tag,"number")) {
+    return lval_read_num(t);
+  }
+  // if we find a symbol tag
+  // create an lval_sym from the
+  // contents.
+  if (strstr(t->tag,"symbol")) {
+    return lval_sym(t->contents);
+  }
 
+  // if were the root node
+  // make an sexpr
   lval* x = NULL;
-  if (strcmp(t->tag,">") == 0) { x = lval_sexpr(); }
-  if (strcmp(t->tag,"sexpr")) { x = lval_sexpr(); }
+  if (strcmp(t->tag,">") == 0) {
+    x = lval_sexpr();
+  }
+  // if we have an sexpr tag
+  // make an sexpr
+  if (strcmp(t->tag,"sexpr")) {
+    x = lval_sexpr();
+  }
 
+  // assign children from mpc ast to the lval sexpr
   for (int i = 0; i < t->children_num; i++){
     if (strcmp(t->children[i]->contents,"(") == 0) { continue; }
     if (strcmp(t->children[i]->contents,")") == 0) { continue; }
@@ -93,6 +136,10 @@ lval* lval_read(mpc_ast_t* t){
 
 void lval_print (lval* v);
 
+// takes an lval (which contains a list of other lval pointers)
+// prints open/close characters
+// in between prints out the contents of each lval in the list
+// of lval pointers
 void lval_expr_print(lval* v, char open, char close){
   putchar(open);
   for (int i = 0; i < v->count; i++){
@@ -104,16 +151,26 @@ void lval_expr_print(lval* v, char open, char close){
   putchar(close);
 }
 
-
+// the fucntion that takes an actual lval and prints it's
+// contents
 void lval_print(lval* v){
   switch(v->type){
-  case LVAL_NUM: printf("%li",v->num); break;
-  case LVAL_ERR: printf("Error: %s",v->err); break;
-  case LVAL_SYM: printf("%s",v->sym); break;
-  case LVAL_SEXPR: lval_expr_print(v,'(',')'); break;    
+  case LVAL_NUM:
+    printf("%li",v->num);
+    break;
+  case LVAL_ERR:
+    printf("Error: %s",v->err);
+    break;
+  case LVAL_SYM:
+    printf("%s",v->sym);
+    break;
+  case LVAL_SEXPR:
+    lval_expr_print(v,'(',')');
+    break;    
   }  
 }
 
+// function for adding a newline after a call to lval_print
 void lval_println(lval* v){ lval_print(v); putchar('\n'); }
 
 lval* lval_eval(lval* v);
@@ -133,9 +190,10 @@ lval* lval_take(lval* v, int i){
   return x;
 }
 
-
 lval* builtin_op(lval* a, char* op){
   // make sure all arguments are numbers
+  // if we find a non number delete the
+  // lval and return an error
   for (int i = 0; i < a->count; i++){
     if (a->cell[i]->type != LVAL_NUM){
       lval_del(a);
@@ -143,7 +201,8 @@ lval* builtin_op(lval* a, char* op){
     }
   }
   
-  // pop the first element
+  // if all elements are numbers,
+  // get the first one.
   lval* x = lval_pop(a,0);
   
   // if it's a - and there's no arguments do unary negation
@@ -167,45 +226,73 @@ lval* builtin_op(lval* a, char* op){
       }
       x->num /= y->num;
     }
+    // delete the popped lval
     lval_del(y);
   }
+  // delete the passed in lval
   lval_del(a);
+  // return the accumulated number
   return x;
 }
 
 lval* lval_eval_sexpr(lval* v){
-  // eval children
+  // eval children of the passed in lval
   for (int i = 0; i < v->count; i++){
     v->cell[i] = lval_eval(v->cell[i]);
   }
   
-  // error checking
+  // for all children if any is an error
+  // then pop that one out and return it
   for (int i = 0; i < v->count; i++){
-    if (v->cell[i]->type == LVAL_ERR) { return lval_take(v,i); }
+    if (v->cell[i]->type == LVAL_ERR) {
+      return lval_take(v,i);
+    }
   }
   
-  // empty expression
-  if (v->count == 0) { return v;}
+  // if the expression has nothing then
+  // return the lval as it was given
+  if (v->count == 0) {
+    return v;
+  }
 
-  // single expression
-  if (v->count == 1) { return lval_take(v,0); }
+  // if the expression has 1 thing in it
+  // just return that one lval
+  if (v->count == 1) {
+    return lval_take(v,0);
+  }
 
-  // ensure first element is symbol
+  // if we make it part all the above
+  // and have a simplified, valid, lval
+  // expr then get the first elem of the
+  // sexpr
   lval* f = lval_pop(v,0);
+  // if it's not a symbol then
+  // delete the 0th lval we popped
+  // and delete the original lval
+  // and return an error.
   if (f->type != LVAL_SYM) {
+    // 
     lval_del(f);
     lval_del(v);
     return lval_err("S-expression Does not start with symbol!");
   }
 
-  // call builtin with operator
+  // if we have a symbol call that symbol
+  // as a builtin operator
   lval* result = builtin_op(v,f->sym);
+  // delete the popped value, the v
+  // original lval value is deleted
+  // in the call to builtin_op
   lval_del(f);
   return result;
 }
 
+// take an lval, if it's an sexpr
+// eval it, otherwise return it
 lval* lval_eval(lval* v){
-  if (v->type == LVAL_SEXPR) { return lval_eval_sexpr(v); }
+  if (v->type == LVAL_SEXPR) {
+    return lval_eval_sexpr(v);
+  }
   return v;
 }
 
@@ -219,7 +306,7 @@ int main(int argc, char** argv) {
   mpca_lang(MPCA_LANG_DEFAULT,
   "                                                                \
     number   : /-?[0-9]+/ ;		                           \
-    symbol   : '+' | '-' | '*' | '/' | '%' | '^' ;                 \
+    symbol   : '+' | '-' | '*' | '/' ;                             \
     sexpr    : '(' <expr>* ')' ;                                   \
     expr     : <number> | <symbol> | <sexpr> ;                     \
     lispy     : /^/ <expr>* /$/ ;                                  \
